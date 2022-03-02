@@ -158,6 +158,45 @@ int writeback()
     WB.push_back(MEM_ALU);
     MEM_ALU = get_NOP();
   }
+
+  // J: structual memory write hazard
+  if (config->regFileWritePorts < config->pipelineWidth) {
+    if (is_older(MEM_ALU, MEM_lwsw)) {
+      WB.push_back(MEM_ALU);
+      MEM_ALU = get_NOP();
+    } else {
+      WB.push_back(MEM_lwsw);
+      MEM_lwsw = get_NOP();
+    }
+  }
+
+  // J: RAW
+  while (ID.size() > 0) {
+    int reg_a = ID.back().inst.sReg_a;
+    int reg_b = ID.back().inst.sReg_b;
+    int alu_dReg = MEM_ALU.inst.dReg;
+    int ls_dReg = MEM_lwsw.inst.dReg;
+
+    if (alu_dReg == reg_a || alu_dReg == reg_b || ls_dReg == reg_a || ls_dReg == reg_b) {
+      IF.push_front(ID.back());
+      ID.pop_back();
+    }
+  }
+
+  // J: WAW
+  if (config->pipelineWidth == 2) {
+    if ( MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
+      if (is_older(MEM_ALU, MEM_lwsw)) {
+        WB.push_back(MEM_ALU);
+        MEM_ALU = get_NOP();
+      }
+      else {
+        WB.push_back(MEM_lwsw);
+        MEM_lwsw = get_NOP();
+      }
+    }
+  }
+
   if (verbose) {/* print the instruction exiting the pipeline if verbose=1 */
     for (int i = 0; i < (int) WB.size(); i++) {
       printf("[%d: WB] %s\n", cycle_number, get_instruction_string(WB[i], true));
