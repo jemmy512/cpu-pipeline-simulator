@@ -26,6 +26,11 @@ bool is_lwsw(dynamic_inst dinst) {
   return inst.type == ti_LOAD || inst.type == ti_STORE;
 }
 
+bool is_lw(dynamic_inst dinst) {
+  instruction inst = dinst.inst;
+  return inst.type == ti_LOAD;
+}
+
 bool is_NOP(dynamic_inst dinst) {
   instruction inst = dinst.inst;
   return inst.type == ti_NOP;
@@ -50,6 +55,92 @@ bool is_finished()
   return 1;
 }
 
+// int writeback()
+// {
+//   static unsigned int cur_seq = 1;
+//   bool hasHazard = false;
+//   bool hasWB = !is_NOP(MEM_ALU) || !is_NOP(MEM_lwsw);
+
+//   WB.clear();
+
+//   // J: structual memory write hazard
+//   if (config->regFileWritePorts < config->pipelineWidth) {
+//     hasHazard = true;
+
+//     if (is_older(MEM_ALU, MEM_lwsw)) {
+//       WB.push_back(MEM_ALU);
+//       MEM_ALU = get_NOP();
+//     } else {
+//       WB.push_back(MEM_lwsw);
+//       MEM_lwsw = get_NOP();
+//     }
+//   }
+
+//   // J: RAW
+//   std::deque<dynamic_inst> IDTmp;
+
+//   while (hasWB && ID.size() > 0) {
+//     int reg_a = ID.front().inst.sReg_a;
+//     int reg_b = ID.front().inst.sReg_b;
+//     int alu_dReg = MEM_ALU.inst.dReg;
+//     int ls_dReg = MEM_lwsw.inst.dReg;
+
+//     if (alu_dReg == reg_a || alu_dReg == reg_b || ls_dReg == reg_a || ls_dReg == reg_b) {
+//       hasHazard = true;
+//       IF.push_front(ID.front());
+//     } else {
+//       IDTmp.push_back(ID.front());
+//     }
+//     ID.pop_front();
+//   }
+//   ID.insert(ID.end(), IDTmp.begin(), IDTmp.end());
+
+//   // J: WAW
+//   if (config->pipelineWidth > 1) {
+//     if (!is_NOP(MEM_ALU) && !is_NOP(MEM_ALU) && MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
+//       hasHazard = true;
+//       if (is_older(MEM_ALU, MEM_lwsw)) {
+//         WB.push_back(MEM_ALU);
+//         MEM_ALU = get_NOP();
+//       } else {
+//         WB.push_back(MEM_lwsw);
+//         MEM_lwsw = get_NOP();
+//       }
+//     }
+//   }
+
+//   if (!hasHazard) {
+//     if (is_older(MEM_ALU, MEM_lwsw)) {
+//       WB.push_back(MEM_ALU);
+//       MEM_ALU = get_NOP();
+//       WB.push_back(MEM_lwsw);
+//       MEM_lwsw = get_NOP();
+//     } else {
+//       WB.push_back(MEM_lwsw);
+//       MEM_lwsw = get_NOP();
+//       WB.push_back(MEM_ALU);
+//       MEM_ALU = get_NOP();
+//     }
+//   }
+
+//   if (verbose) {/* print the instruction exiting the pipeline if verbose=1 */
+//     for (int i = 0; i < (int) WB.size(); i++) {
+//       printf("[%d: WB] %s\n", cycle_number, get_instruction_string(WB[i], true));
+//       if(!is_NOP(WB[i])) {
+//         if(config->pipelineWidth > 1 && config->regFileWritePorts == 1) {
+//           // There is a corner case where an instruction without a
+//           // destination register can get pulled in out of sequence but
+//           // other than that, it should be strictly in-order.
+//         } else {
+//           assert(WB[i].seq == cur_seq);
+//         }
+//         cur_seq++;
+//       }
+//     }
+//   }
+//   return WB.size();
+// }
+
 int writeback()
 {
   static unsigned int cur_seq = 1;
@@ -67,45 +158,6 @@ int writeback()
     WB.push_back(MEM_ALU);
     MEM_ALU = get_NOP();
   }
-
-  // J: structual memory write hazard
-  if (config->regFileWritePorts < config->pipelineWidth) {
-    if (is_older(MEM_ALU, MEM_lwsw)) {
-      WB.push_back(MEM_ALU);
-      MEM_ALU = get_NOP();
-    } else {
-      WB.push_back(MEM_lwsw);
-      MEM_lwsw = get_NOP();
-    }
-  }
-
-  // J: RAW
-  while (ID.size() > 0) {
-    int reg_a = ID.back().inst.sReg_a;
-    int reg_b = ID.back().inst.sReg_b;
-    int alu_dReg = MEM_ALU.inst.dReg;
-    int ls_dReg = MEM_lwsw.inst.dReg;
-
-    if (alu_dReg == reg_a || alu_dReg == reg_b || ls_dReg == reg_a || ls_dReg == reg_b) {
-      IF.push_front(ID.back());
-      ID.pop_back();
-    }
-  }
-
-  // J: WAW
-  if (config->pipelineWidth == 2) {
-    if ( MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
-      if (is_older(MEM_ALU, MEM_lwsw)) {
-        WB.push_back(MEM_ALU);
-        MEM_ALU = get_NOP();
-      }
-      else {
-        WB.push_back(MEM_lwsw);
-        MEM_lwsw = get_NOP();
-      }
-    }
-  }
-
   if (verbose) {/* print the instruction exiting the pipeline if verbose=1 */
     for (int i = 0; i < (int) WB.size(); i++) {
       printf("[%d: WB] %s\n", cycle_number, get_instruction_string(WB[i], true));
@@ -132,6 +184,7 @@ int memory()
     EX_ALU = get_NOP();
     insts++;
   }
+
   if (is_NOP(MEM_lwsw)) {
     MEM_lwsw = EX_lwsw;
     EX_lwsw = get_NOP();
@@ -139,9 +192,9 @@ int memory()
   }
 
   // J: structual memory read hazard
-  if (config->splitCaches == false && IF.size() > 0) {
+  if (config->splitCaches == false && is_lwsw(MEM_lwsw)) {
     for (int i = 0; i < config->pipelineWidth; ++i) {
-      IF.push_front(get_NOP());
+      IF.push_back(get_NOP());
     }
   }
 
@@ -164,6 +217,11 @@ int issue()
         break;;
       }
       EX_lwsw = ID.front();
+      ID.pop_front();
+    } else if (is_NOP(ID.front())) {
+      if (!is_NOP(EX_ALU) && !is_NOP(EX_lwsw)) {
+        break;
+      }
       ID.pop_front();
     } else {
       assert(0);

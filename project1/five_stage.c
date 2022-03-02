@@ -1,5 +1,5 @@
 /** Code by @author Wonsun Ahn
- * 
+ *
  * Main function. Parses commandline arguments and invokes the five stages in
  * CPU.c at every clock cycle.
  */
@@ -13,8 +13,8 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <arpa/inet.h>
-#include "CPU.h" 
-#include "trace.h" 
+#include "CPU.h"
+#include "trace.h"
 
 void print_usage_info()
 {
@@ -31,7 +31,7 @@ int main(int argc, char **argv)
 {
   char *trace_file_name = NULL;
   char *config_file_name = NULL;
-  
+
   char c;
   while ((c = getopt (argc, argv, "hvdc:t:")) != -1) {
     switch (c) {
@@ -65,6 +65,9 @@ int main(int argc, char **argv)
         abort ();
     }
   }
+
+  // trace_file_name ="traces/structural_memory.tr";
+  // config_file_name = "confs/1-wide.conf";
 
   if (config_file_name == NULL || trace_file_name == NULL) {
     print_usage_info();
@@ -116,5 +119,3 @@ int main(int argc, char **argv)
 
   return 0;
 }
-
-
