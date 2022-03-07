@@ -16,6 +16,12 @@ std::deque<dynamic_inst> IF, ID, WB;
 dynamic_inst EX_ALU = {0}, MEM_ALU = {0};
 dynamic_inst EX_lwsw = {0}, MEM_lwsw = {0};
 
+bool WB_ctrl = 1;
+bool MEM_ctrl[2] = {1, 1};
+bool EX_ctrl[3] = {1, 1, 1};
+bool ID_ctrl = 1;
+bool IF_ctrl = 1;
+
 bool is_ALU(dynamic_inst dinst) {
   instruction inst = dinst.inst;
   return inst.type != ti_NOP && inst.type != ti_LOAD && inst.type != ti_STORE;
@@ -144,23 +150,24 @@ bool is_finished()
 int writeback()
 {
   static unsigned int cur_seq = 1;
+  bool continueWB = true;
+
+  bool doOp = false;
+  for (int i = 0; i < WB.size(); ++i) {
+    doOp = doOp || !is_NOP(WB[i]);
+  }
+
+  if (doOp) {
+    IF_ctrl = true;
+    ID_ctrl = true;
+  }
 
   WB.clear();
-  if (is_older(MEM_ALU, MEM_lwsw)) {
-    WB.push_back(MEM_ALU);
-    MEM_ALU = get_NOP();
-    WB.push_back(MEM_lwsw);
-    MEM_lwsw = get_NOP();
-  }
-  else {
-    WB.push_back(MEM_lwsw);
-    MEM_lwsw = get_NOP();
-    WB.push_back(MEM_ALU);
-    MEM_ALU = get_NOP();
-  }
 
-  // J: structual memory write hazard
-  if (config->regFileWritePorts < config->pipelineWidth) {
+  // J: structual hazard register write
+  if (is_ALU(MEM_ALU) && is_lw(MEM_lwsw) && (config->regFileWritePorts == 1)) {
+    continueWB = false;
+
     if (is_older(MEM_ALU, MEM_lwsw)) {
       WB.push_back(MEM_ALU);
       MEM_ALU = get_NOP();
@@ -170,30 +177,32 @@ int writeback()
     }
   }
 
-  // J: RAW
-  while (ID.size() > 0) {
-    int reg_a = ID.back().inst.sReg_a;
-    int reg_b = ID.back().inst.sReg_b;
-    int alu_dReg = MEM_ALU.inst.dReg;
-    int ls_dReg = MEM_lwsw.inst.dReg;
-
-    if (alu_dReg == reg_a || alu_dReg == reg_b || ls_dReg == reg_a || ls_dReg == reg_b) {
-      IF.push_front(ID.back());
-      ID.pop_back();
-    }
-  }
-
   // J: WAW
-  if (config->pipelineWidth == 2) {
-    if ( MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
+  if (continueWB && config->regFileWritePorts == 2) {
+    if (is_ALU(MEM_ALU) && is_lw(MEM_lwsw) && MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
+      continueWB = false;
+
       if (is_older(MEM_ALU, MEM_lwsw)) {
         WB.push_back(MEM_ALU);
         MEM_ALU = get_NOP();
-      }
-      else {
+      } else {
         WB.push_back(MEM_lwsw);
         MEM_lwsw = get_NOP();
       }
+    }
+  }
+
+  if (continueWB) {
+    if (is_older(MEM_ALU, MEM_lwsw)) {
+      WB.push_back(MEM_ALU);
+      MEM_ALU = get_NOP();
+      WB.push_back(MEM_lwsw);
+      MEM_lwsw = get_NOP();
+    } else {
+      WB.push_back(MEM_lwsw);
+      MEM_lwsw = get_NOP();
+      WB.push_back(MEM_ALU);
+      MEM_ALU = get_NOP();
     }
   }
 
@@ -212,6 +221,7 @@ int writeback()
       }
     }
   }
+
   return WB.size();
 }
 
@@ -231,11 +241,20 @@ int memory()
   }
 
   // J: structual memory read hazard
-  if (config->splitCaches == false && is_lwsw(MEM_lwsw)) {
-    for (int i = 0; i < config->pipelineWidth; ++i) {
-      IF.push_back(get_NOP());
-    }
-  }
+  // if (config->splitCaches == false && is_lw(MEM_lwsw)) {
+  //   int i = IF.size() - 1;
+  //   int nopCount = 0;
+  //   while (i >= 0 && is_NOP(IF[i--])) {
+  //     ++nopCount;
+  //   }
+
+  //   i = config->pipelineWidth - nopCount;
+  //   while (i--) {
+  //     IF.push_back(get_NOP());
+  //   }
+  // }
+
+  // print_pipeline();
 
   return insts;
 }
@@ -257,12 +276,14 @@ int issue()
       }
       EX_lwsw = ID.front();
       ID.pop_front();
-    } else if (is_NOP(ID.front())) {
+    }
+    else if (is_NOP(ID.front())) {
       if (!is_NOP(EX_ALU) && !is_NOP(EX_lwsw)) {
         break;
       }
       ID.pop_front();
-    } else {
+    }
+    else {
       assert(0);
     }
     insts++;
@@ -270,14 +291,71 @@ int issue()
   return insts;
 }
 
+// int issue()
+// {
+//   /* in-order issue */
+//   int insts = 0;
+//   while (ID.size() > 0 && insts < config->pipelineWidth) {
+//     if (is_ALU(ID.front())) {
+//       if (is_NOP(EX_ALU)) {
+//         EX_ALU = ID.front();
+//         ID.pop_front();
+//       }
+//     } else if (is_lwsw(ID.front())) {
+//       if (is_NOP(EX_lwsw)) {
+//         EX_lwsw = ID.front();
+//         ID.pop_front();
+//       }
+//     } else if (is_NOP(ID.front())) {
+//       if (is_NOP(EX_ALU) || is_NOP(EX_lwsw)) {
+//         ID.pop_front();
+//       }
+//     } else {
+//       assert(0);
+//     }
+
+//     insts++;
+//   }
+//   return insts;
+// }
+
 int decode()
 {
   int insts = 0;
-  while ((int)IF.size() > 0 && (int)ID.size() < config->pipelineWidth) {
+  while (ID_ctrl && (int)IF.size() > 0 && (int)ID.size() < config->pipelineWidth) {
     ID.push_back(IF.front());
     IF.pop_front();
     insts++;
   }
+
+  // J: RAW
+  if (ID_ctrl && config->enableForwarding == false) {
+    int alu_dReg = EX_ALU.inst.dReg;
+    int ls_dReg = EX_lwsw.inst.dReg;
+
+    for (int i = 0; i < ID.size(); ++i) {
+      int reg_a = ID[i].inst.sReg_a;
+      int reg_b = ID[i].inst.sReg_b;
+
+      bool isALURAW = is_ALU(EX_ALU) && (alu_dReg == reg_a || alu_dReg == reg_b);
+      bool isLWRAW = is_lw(EX_lwsw) && (ls_dReg == reg_a || ls_dReg == reg_b);
+
+      if (isALURAW || isLWRAW) {
+        for (int j = ID.size() - 1; j >= i; --j) {
+          insts--;
+          IF.push_front(ID.back());
+          ID.pop_back();
+        }
+
+        IF_ctrl = false;
+        ID_ctrl = false;
+      } else {
+        IF_ctrl = true;
+        ID_ctrl = true;
+      }
+    }
+  }
+
   return insts;
 }
 
@@ -289,7 +367,7 @@ int fetch()
   instruction *tr_entry = NULL;
 
   /* copy trace entry(s) into IF stage */
-  while((int)IF.size() < config->pipelineWidth) {
+  while (IF_ctrl && (int)IF.size() < config->pipelineWidth) {
     size_t size = trace_get_item(&tr_entry); /* put the instruction into a buffer */
     if (size > 0) {
       dinst.inst = *tr_entry;
