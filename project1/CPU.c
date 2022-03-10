@@ -17,9 +17,9 @@ std::deque<dynamic_inst> IF, ID, WB;
 dynamic_inst EX_ALU = {0}, MEM_ALU = {0};
 dynamic_inst EX_lwsw = {0}, MEM_lwsw = {0};
 
-bool WB_ctrl = 1;
-bool MEM_ctrl[2] = {1, 1};
-bool EX_ctrl[3] = {1, 1, 1};
+// J: control signal
+bool Ctrl_sturt_mem = 1;
+bool Ctrl_EX = 1;
 bool Ctrl_ID = 1;
 bool Ctrl_IF = 1;
 bool Ctrl_branch_taken = 0;
@@ -37,6 +37,10 @@ bool is_lwsw(dynamic_inst dinst) {
 bool is_lw(dynamic_inst dinst) {
   instruction inst = dinst.inst;
   return inst.type == ti_LOAD;
+}
+
+bool is_sw(dynamic_inst dinst) {
+  return dinst.inst.type == ti_STORE;
 }
 
 bool is_NOP(dynamic_inst dinst) {
@@ -67,98 +71,13 @@ bool is_finished()
   return 1;
 }
 
-// int writeback()
-// {
-//   static unsigned int cur_seq = 1;
-//   bool hasHazard = false;
-//   bool hasWB = !is_NOP(MEM_ALU) || !is_NOP(MEM_lwsw);
-
-//   WB.clear();
-
-//   // J: structual memory write hazard
-//   if (config->regFileWritePorts < config->pipelineWidth) {
-//     hasHazard = true;
-
-//     if (is_older(MEM_ALU, MEM_lwsw)) {
-//       WB.push_back(MEM_ALU);
-//       MEM_ALU = get_NOP();
-//     } else {
-//       WB.push_back(MEM_lwsw);
-//       MEM_lwsw = get_NOP();
-//     }
-//   }
-
-//   // J: RAW
-//   std::deque<dynamic_inst> IDTmp;
-
-//   while (hasWB && ID.size() > 0) {
-//     int reg_a = ID.front().inst.sReg_a;
-//     int reg_b = ID.front().inst.sReg_b;
-//     int alu_dReg = MEM_ALU.inst.dReg;
-//     int ls_dReg = MEM_lwsw.inst.dReg;
-
-//     if (alu_dReg == reg_a || alu_dReg == reg_b || ls_dReg == reg_a || ls_dReg == reg_b) {
-//       hasHazard = true;
-//       IF.push_front(ID.front());
-//     } else {
-//       IDTmp.push_back(ID.front());
-//     }
-//     ID.pop_front();
-//   }
-//   ID.insert(ID.end(), IDTmp.begin(), IDTmp.end());
-
-//   // J: WAW
-//   if (config->pipelineWidth > 1) {
-//     if (!is_NOP(MEM_ALU) && !is_NOP(MEM_ALU) && MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
-//       hasHazard = true;
-//       if (is_older(MEM_ALU, MEM_lwsw)) {
-//         WB.push_back(MEM_ALU);
-//         MEM_ALU = get_NOP();
-//       } else {
-//         WB.push_back(MEM_lwsw);
-//         MEM_lwsw = get_NOP();
-//       }
-//     }
-//   }
-
-//   if (!hasHazard) {
-//     if (is_older(MEM_ALU, MEM_lwsw)) {
-//       WB.push_back(MEM_ALU);
-//       MEM_ALU = get_NOP();
-//       WB.push_back(MEM_lwsw);
-//       MEM_lwsw = get_NOP();
-//     } else {
-//       WB.push_back(MEM_lwsw);
-//       MEM_lwsw = get_NOP();
-//       WB.push_back(MEM_ALU);
-//       MEM_ALU = get_NOP();
-//     }
-//   }
-
-//   if (verbose) {/* print the instruction exiting the pipeline if verbose=1 */
-//     for (auto i = 0; i < (int) WB.size(); i++) {
-//       printf("[%d: WB] %s\n", cycle_number, get_instruction_string(WB[i], true));
-//       if(!is_NOP(WB[i])) {
-//         if(config->pipelineWidth > 1 && config->regFileWritePorts == 1) {
-//           // There is a corner case where an instruction without a
-//           // destination register can get pulled in out of sequence but
-//           // other than that, it should be strictly in-order.
-//         } else {
-//           assert(WB[i].seq == cur_seq);
-//         }
-//         cur_seq++;
-//       }
-//     }
-//   }
-//   return WB.size();
-// }
-
 int writeback()
 {
   static unsigned int cur_seq = 1;
   bool continueWB = true;
 
   // J: data_raw 2
+  // J: enable Ctrl_IF & Ctrl_ID if WB is finished
   bool doOp = false;
   for (auto i = 0; i < WB.size(); ++i) {
     doOp = doOp || !is_NOP(WB[i]);
@@ -213,11 +132,21 @@ int writeback()
     }
   }
 
+  // J: structural_memory
+  if (config->splitCaches == false) {
+    for (const auto& inst : WB) {
+      if (is_lw(inst)) {
+        Ctrl_sturt_mem = true;
+        break;
+      }
+    }
+  }
+
   if (verbose) {/* print the instruction exiting the pipeline if verbose=1 */
     for (auto i = 0; i < (int) WB.size(); i++) {
       printf("[%d: WB] %s\n", cycle_number, get_instruction_string(WB[i], true));
-      if(!is_NOP(WB[i])) {
-        if(config->pipelineWidth > 1 && config->regFileWritePorts == 1) {
+      if (!is_NOP(WB[i])) {
+        if (config->pipelineWidth > 1 && config->regFileWritePorts == 1) {
           // There is a corner case where an instruction without a
           // destination register can get pulled in out of sequence but
           // other than that, it should be strictly in-order.
@@ -234,8 +163,29 @@ int writeback()
 
 int memory()
 {
+  // J: enable fetch code for branch taken since branch inst is done
   if (is_branch(EX_ALU)) {
     Ctrl_branch_taken = false;
+  }
+
+  // J: data_raw with mem forwarding
+  if (config->enableForwarding) {
+    for (const auto& dinst : WB) {
+      if (is_lw(dinst)) {
+        int reg_d = dinst.inst.dReg;
+
+        for (auto i = 0; !Ctrl_EX && i < ID.size(); ++i) {
+          int reg_a = ID[i].inst.sReg_a;
+          int reg_b = ID[i].inst.sReg_b;
+
+          if (reg_d == reg_a || reg_d == reg_b) {
+            Ctrl_EX = true;
+            Ctrl_ID = true;
+            Ctrl_IF = true;
+          }
+        }
+      }
+    }
   }
 
   int insts = 0;
@@ -252,20 +202,9 @@ int memory()
   }
 
   // J: structural_memory
-  // if (config->splitCaches == false && is_lw(MEM_lwsw)) {
-  //   int i = IF.size() - 1;
-  //   int nopCount = 0;
-  //   while (i >= 0 && is_NOP(IF[i--])) {
-  //     ++nopCount;
-  //   }
-
-  //   i = config->pipelineWidth - nopCount;
-  //   while (i--) {
-  //     IF.push_back(get_NOP());
-  //   }
-  // }
-
-  // print_pipeline();
+  if (config->splitCaches == false && is_lw(MEM_lwsw)) {
+    Ctrl_sturt_mem = false;
+  }
 
   return insts;
 }
@@ -274,7 +213,7 @@ int issue()
 {
   /* in-order issue */
   int insts = 0;
-  while (ID.size() > 0) {
+  while (Ctrl_EX && ID.size() > 0) {
     if (is_ALU(ID.front())) {
       if (!is_NOP(EX_ALU)) {
         break;;
@@ -300,81 +239,35 @@ int issue()
     insts++;
   }
 
-  // J: control_not_taken
-  // J: control_taken
-  // if (is_branch(EX_ALU)) {
-  //   bool isBranchTaken = true;
-  //   int addr = EX_ALU.inst.Addr;
+  // J: data_raw 2 with ex forwarding
+  if (config->enableForwarding && (is_lw(MEM_lwsw) || is_lw(EX_lwsw))) {
+    if (!is_NOP(EX_ALU)) {
+      ID.push_front(EX_ALU);
+    }
 
-  //   if (!is_NOP(EX_lwsw)) {
-  //     printf("LW %d | %d\n", addr, EX_lwsw.inst.PC);
-  //     if (addr == EX_lwsw.inst.PC) {
-  //       isBranchTaken = false;
-  //     }
-  //   }
+    for (auto dinst : { MEM_lwsw, EX_lwsw }) {
+      int reg_d = dinst.inst.dReg;
+      for (auto i = 0; i < ID.size() && Ctrl_EX && !is_NOP(dinst); ++i) {
+        int reg_a = ID[i].inst.sReg_a;
+        int reg_b = ID[i].inst.sReg_b;
 
-  //   for (auto i = 0; i < ID.size(); ++i) {
-  //     printf("ID %d | %d\n", addr, ID[i].inst.PC);
-  //     if (addr == ID[i].inst.PC) {
-  //       isBranchTaken = false;
-  //     }
-  //   }
+        if (reg_d == reg_a || reg_d == reg_b) {
+          Ctrl_EX = false;
+          Ctrl_ID = false;
+          Ctrl_IF = false;
 
-  //   for (auto i = 0; i < IF.size(); ++i) {
-  //     printf("IF %d | %d\n", addr, IF[i].inst.PC);
-  //     if (addr == IF[i].inst.PC) {
-  //       isBranchTaken = false;
-  //     }
-  //   }
+          EX_ALU = get_NOP();
+        }
+      }
+    }
 
-  //   if (isBranchTaken) {
-  //     printf("branch taken...\n");
-
-  //     insts = 0;
-  //     for (auto i = 0; i < ID.size(); ++i) {
-  //       IF.push_front(ID.back());
-  //       ID.pop_back();
-  //     }
-
-  //     for (auto i = 0; i < config->pipelineWidth; ++i) {
-  //       IF.push_front(get_NOP());
-  //     }
-  //   } else {
-  //     printf("branch not taken...\n");
-  //   }
-
-  // }
+    if (!is_NOP(EX_ALU)) {
+      ID.pop_front();
+    }
+  }
 
   return insts;
 }
-
-// int issue()
-// {
-//   /* in-order issue */
-//   int insts = 0;
-//   while (ID.size() > 0 && insts < config->pipelineWidth) {
-//     if (is_ALU(ID.front())) {
-//       if (is_NOP(EX_ALU)) {
-//         EX_ALU = ID.front();
-//         ID.pop_front();
-//       }
-//     } else if (is_lwsw(ID.front())) {
-//       if (is_NOP(EX_lwsw)) {
-//         EX_lwsw = ID.front();
-//         ID.pop_front();
-//       }
-//     } else if (is_NOP(ID.front())) {
-//       if (is_NOP(EX_ALU) || is_NOP(EX_lwsw)) {
-//         ID.pop_front();
-//       }
-//     } else {
-//       assert(0);
-//     }
-
-//     insts++;
-//   }
-//   return insts;
-// }
 
 int decode()
 {
@@ -385,36 +278,42 @@ int decode()
     insts++;
   }
 
-  // J: data_raw 1
+  // J: data_raw without forwarding
   if (Ctrl_ID && config->enableForwarding == false) {
-    int alu_dReg = EX_ALU.inst.dReg;
-    int ls_dReg = EX_lwsw.inst.dReg;
+    ID.push_front(EX_ALU);
+    ID.push_front(EX_lwsw);
 
-    for (auto i = 0; i < ID.size(); ++i) {
-      int reg_a = ID[i].inst.sReg_a;
-      int reg_b = ID[i].inst.sReg_b;
+    for (int i = 2; i < ID.size(); ++i) {
+        int reg_a = ID[i].inst.sReg_a;
+        int reg_b = ID[i].inst.sReg_b;
 
-      bool isALURAW = is_ALU(EX_ALU) && (alu_dReg == reg_a || alu_dReg == reg_b);
-      bool isLWRAW = is_lw(EX_lwsw) && (ls_dReg == reg_a || ls_dReg == reg_b);
+      for (int j = i-1; j >= 0 && ID.size() > 2; --j) {
+        int reg_d = ID[j].inst.dReg;
 
-      if (isALURAW || isLWRAW) {
-        for (auto j = ID.size() - 1; j >= i; --j) {
-          insts--;
-          IF.push_front(ID.back());
-          ID.pop_back();
+        if ((is_ALU(ID[j]) || is_lw(ID[j])) && (reg_d == reg_a || reg_d == reg_b)) {
+          for (int k = ID.size() - 1; k >= i; --k) {
+            insts--;
+            IF.push_front(ID.back());
+            ID.pop_back();
+          }
+
+          Ctrl_IF = false;
+          Ctrl_ID = false;
+          break;
+        } else {
+          Ctrl_IF = true;
+          Ctrl_ID = true;
         }
-
-        Ctrl_IF = false;
-        Ctrl_ID = false;
-      } else {
-        Ctrl_IF = true;
-        Ctrl_ID = true;
       }
     }
+
+    ID.pop_front();
+    ID.pop_front();
   }
 
   return insts;
 }
+
 
 int fetch()
 {
@@ -423,18 +322,22 @@ int fetch()
   dynamic_inst dinst;
   instruction *tr_entry = NULL;
 
-  /* copy trace entry(s) into IF stage */
   auto doFetch = []() {
+    bool doFetchForBranch = false;
+
+    // J: fetch if branch is not taken
     if (!Ctrl_branch_taken)
-      return true;
+      doFetchForBranch = true;
 
+    // J: fetch if branch is taken but predictor is enabled
     if (Ctrl_branch_taken && config->branchPredictor && config->branchTargetBuffer)
-      return true;
+      doFetchForBranch = true;
 
-    return false;
+    return doFetchForBranch && Ctrl_IF && Ctrl_sturt_mem;
   };
 
-  while (doFetch() && Ctrl_IF && (int)IF.size() < config->pipelineWidth) {
+  /* copy trace entry(s) into IF stage */
+  while (doFetch() && (int)IF.size() < config->pipelineWidth) {
     size_t size = trace_get_item(&tr_entry); /* put the instruction into a buffer */
     if (size > 0) {
       dinst.inst = *tr_entry;
@@ -442,24 +345,21 @@ int fetch()
       IF.push_back(dinst);
       insts++;
 
+      if (verbose) {/* print the instruction entering the pipeline if verbose=1 */
+        printf("[%d: IF] %s\n", cycle_number, get_instruction_string(IF.back(), true));
+      }
+
       if (is_branch(dinst) && dinst.inst.Addr != dinst.inst.PC + 4) {
         Ctrl_branch_taken = true;
+        // J: don't fetch any inst if branch taken
+        break;
       }
     } else {
       break;
     }
-
-    if (verbose) {/* print the instruction entering the pipeline if verbose=1 */
-      printf("[%d: IF] %s\n", cycle_number, get_instruction_string(IF.back(), true));
-    }
-  }
-
-  if (Ctrl_branch_taken && !config->branchPredictor && !config->branchTargetBuffer) {
-    while ((int)IF.size() < config->pipelineWidth) {
-      IF.push_back(get_NOP());
-    }
   }
 
   inst_number += insts;
+
   return insts;
 }
