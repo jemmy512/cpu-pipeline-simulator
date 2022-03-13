@@ -21,12 +21,22 @@
 - [Resources](#resources)
   * [GitHub Primer](#github-primer)
   * [Debugging C](#debugging-c)
+  * [Using DDD through remote X11 forwarding](#using-ddd-through-remote-x11-forwarding)
+    + [For Windows 10](#for-windows-10)
+    + [For MacOS](#for-macos)
+    + [For Linux](#for-linux)
+    + [Establishing SSH connection with X11 forwarding](#establishing-ssh-connection-with-x11-forwarding)
+  * [Using DDD by installing on local machine](#using-ddd-by-installing-on-local-machine)
+    + [For Windows 10 WSL or Linux](#for-windows-10-wsl-or-linux)
+    + [For Mac](#for-mac)
+  * [DDD hang issue solution](#ddd-hang-issue-solution)
+
 
 # CS/COE 1541 - Introduction to Computer Architecture
 Spring Semester 2022 - Project 1
 
 Please accept Project 1 on **GitHub Classroom** using the following link:
-TBD
+https://classroom.github.com/a/jREHYDcC
 
 * DUE: Mar 16 (Wednesday), 2022 4:30 PM 
 
@@ -674,6 +684,7 @@ simulator will not get you any points.
 * Linux command line tutorial: [The Linux Command Line](http://linuxcommand.org/lc3_learning_the_shell.php)
 * Valgrind tutorial: [Valgrind tutorial](https://valgrind.org/docs/manual/QuickStart.html)
 * GDB tutorial: [GDB tutorial](https://sourceware.org/gdb/current/onlinedocs/gdb/)
+* DDD tutorial: [DDD tutorial](https://www.gnu.org/software/ddd/manual/html_mono/ddd.html)
 
 ## GitHub Primer
 
@@ -721,3 +732,170 @@ jog your memory:
 
 * Valgrind tutorial: [Valgrind tutorial](https://valgrind.org/docs/manual/QuickStart.html)
 * GDB tutorial: [GDB tutorial](https://sourceware.org/gdb/current/onlinedocs/gdb/)
+
+If you want a graphical interface to GDB there is DDD (Data Display Debugger):
+
+* DDD tutorial: [DDD tutorial](https://www.gnu.org/software/ddd/manual/html_mono/ddd.html)
+
+GDB, Valgrind, and DDD are all available on thoth.cs.pitt.edu, but for you to
+be able to access the DDD GUI over SSH, you will need X11 forwarding enabled.
+
+## Using DDD through remote X11 forwarding
+
+This is how you can use the DDD installation on thoth remotely.
+
+### For Windows 10
+
+Enabling X11 forwarding on Windows 10 is a bit complicated since you have to do
+deal with Windows firewall.  Here is an easy to follow guide written by another
+Computer Architecture professor from the University of Illinois (which also
+happens to be my alma mater :).
+
+* If you have WSL1 installed: https://cs233.github.io/oyom_wsl1_setup.html
+* If you have WSL2 installed: https://cs233.github.io/oyom_wsl2_setup.html
+
+### For MacOS
+
+Enabling X11 forwarding on Mac systems is more straightforward.  All you have to do install XQuartz and launch it:
+
+* XQuartz download URL: https://www.xquartz.org/
+
+### For Linux
+
+For most Linux systems, X11 forwarding should be built-in with the X windows
+system, so no additional installations are needed.
+
+### Establishing SSH connection with X11 forwarding
+
+After enabling X11 forwarding, you have to specify X11 forwarding on your SSH
+connection.  When you connect to thoth, use the following commandline:
+
+```
+ssh -XC USERNAME@thoth.cs.pitt.edu
+```
+
+The -X option enables X11 forwarding and the -C option enables packet
+compression on your SSH connection so you can minimize the bandwidth consumed
+by X11 forwarding.
+
+If all goes well, after you log on to thoth, your $DISPLAY variable should be set up automatically.
+
+```
+wahn@thoth:~$ echo $DISPLAY
+localhost:10.0
+```
+
+If your $DISPLAY is not set up, then that means that something went wrong.
+Either VcXsrv (for Windows) or XQuartz (for Mac) was not set up or something
+else.  Note that you should not force set $DISPLAY on your .bashrc file.  That
+is not going to achieve anything.  $DISPLAY should be automatically set by SSH.
+
+Once the above is confirmed, you can start using any GUI app on thoth.  Now try
+launching DDD:
+
+```
+ddd
+```
+
+The DDD GUI should pop up on your machine momentarily.
+
+## Using DDD by installing on local machine
+
+This is how you can install DDD on your local machine.
+
+### For Windows 10 WSL or Linux
+
+These are the packages required to compile the project and run DDD, using the
+apt package manager.  Please do the following on your linux shell:
+
+```
+sudo apt install gcc
+```
+```
+sudo apt install g++
+```
+```
+sudo apt install make
+```
+```
+sudo apt install libglib2.0-dev
+```
+```
+sudo apt install libcairo2-dev
+```
+```
+sudo apt install libpango1.0-dev
+```
+```
+sudo apt install gdb
+```
+```
+sudo apt install x11-apps
+```
+```
+sudo apt install ddd
+```
+
+### For Mac
+
+Unfortunately, I gdb (and by extension ddd) does not run reliably on MacOS.
+It bas been a long standing problem but has still not been solved:
+https://sourceware.org/bugzilla/show_bug.cgi?id=24069
+
+At least, you can still compile and test the program on your local machine.
+If you want to use gdb or ddd, you will have to do it remotely on thoth.  At
+below are the steps to install the necessary packages.
+
+First you will have to install the XCode commandline developer tools, which
+includes gcc and g++:
+```
+xcode-select --install
+```
+
+Then use Homebrew to install all required libraries:
+```
+brew install glib
+```
+
+You will also have to add some modifications to the Makefile:
+
+Change the COPT line from:
+```
+COPT = -g -Wall -I/usr/include/glib-2.0/ -I/usr/lib/x86_64-linux-gnu/glib-2.0/include/
+```
+to:
+```
+COPT = -g -Wall -I/usr/include/glib-2.0/ -I/usr/lib/x86_64-linux-gnu/glib-2.0/include/ -I/usr/local/opt/glib/include/glib-2.0/ -I/usr/local/opt/glib/lib/glib-2.0/include/
+```
+
+Also change the LOPT line from:
+```
+LOPT = -lglib-2.0
+```
+to
+```
+LOPT = -lglib-2.0 -L/usr/local/opt/glib/lib/
+```
+
+Lastly, replace all mentions of "five_stage_solution" to
+"five_stage_solution.mac".  The five_stage_solution binary was compiled on
+thoth (a Linux machine) which cannot run on a Mac.
+
+## DDD hang issue solution
+
+There is a long standing bug with DDD where it can hang indefinitely when
+launched for the second time.  It is because of some configuration settings
+that get auto-generated the first time it is launched.  The solution is to edit
+the ~/.ddd/init file to change the following line:
+
+```
+set extended-prompt not set\n\
+```
+
+To this line:
+
+```
+set extended-prompt (gdb) \n\
+```
+
+Reference: https://savannah.gnu.org/bugs/index.php
