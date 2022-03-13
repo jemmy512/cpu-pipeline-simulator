@@ -71,29 +71,44 @@ bool is_finished()
   return 1;
 }
 
-int writeback()
-{
-  static unsigned int cur_seq = 1;
+bool branch_taken_begin(dynamic_inst dinst) {
+  if (is_branch(dinst) && dinst.inst.Addr != dinst.inst.PC + 4) {
+    Ctrl_branch_taken = true;
+    // J: don't fetch any inst if branch taken
+    return true;
+  }
+
+  return false;
+}
+
+void branch_taken_end() {
+  if (is_branch(EX_ALU)) {
+    Ctrl_branch_taken = false;
+  }
+}
+
+void structural_memory_begin() {
+  if (config->splitCaches == false && is_lw(MEM_lwsw)) {
+    Ctrl_sturt_mem = false;
+  }
+}
+
+void structural_memory_end() {
+  if (config->splitCaches == false) {
+    for (const auto& inst : WB) {
+      if (is_lw(inst)) {
+        Ctrl_sturt_mem = true;
+        break;
+      }
+    }
+  }
+}
+
+bool structural_regfile() {
   bool continueWB = true;
 
-  // J: data_raw 2
-  // J: enable Ctrl_IF & Ctrl_ID if WB is finished
-  bool doOp = false;
-  for (auto i = 0; i < WB.size(); ++i) {
-    doOp = doOp || !is_NOP(WB[i]);
-  }
-
-  if (doOp) {
-    Ctrl_IF = true;
-    Ctrl_ID = true;
-  }
-
-  WB.clear();
-
-  // J: structural_regfile
   if (is_ALU(MEM_ALU) && is_lw(MEM_lwsw) && (config->regFileWritePorts == 1)) {
     continueWB = false;
-
     if (is_older(MEM_ALU, MEM_lwsw)) {
       WB.push_back(MEM_ALU);
       MEM_ALU = get_NOP();
@@ -103,9 +118,116 @@ int writeback()
     }
   }
 
-  // J: data_waw
-  if (continueWB && config->regFileWritePorts == 2) {
-    if (is_ALU(MEM_ALU) && is_lw(MEM_lwsw) && MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
+  return continueWB;;
+}
+
+void data_raw_mem_forward_begin() {
+  if (config->enableForwarding && (is_lw(MEM_lwsw) || is_lw(EX_lwsw))) {
+    if (!is_NOP(EX_ALU)) {
+      ID.push_front(EX_ALU);
+    }
+
+    for (auto dinst : { MEM_lwsw, EX_lwsw }) {
+      int reg_d = dinst.inst.dReg;
+      for (auto i = 0; i < ID.size() && Ctrl_EX && !is_NOP(dinst) && reg_d != 255; ++i) {
+        int reg_a = ID[i].inst.sReg_a;
+        int reg_b = ID[i].inst.sReg_b;
+
+        if (reg_d == reg_a || reg_d == reg_b) {
+          Ctrl_EX = false;
+          Ctrl_ID = false;
+
+          EX_ALU = get_NOP();
+        }
+      }
+    }
+
+    if (!is_NOP(EX_ALU)) {
+      ID.pop_front();
+    }
+  }
+}
+
+void data_raw_mem_forward_end() {
+  if (config->enableForwarding) {
+    for (const auto& dinst : WB) {
+      if (is_lw(dinst)) {
+        int reg_d = dinst.inst.dReg;
+
+        for (auto i = 0; !Ctrl_EX && i < ID.size(); ++i) {
+          int reg_a = ID[i].inst.sReg_a;
+          int reg_b = ID[i].inst.sReg_b;
+
+          if (reg_d != 255 && (reg_d == reg_a || reg_d == reg_b)) {
+            Ctrl_EX = true;
+            Ctrl_ID = true;
+          }
+        }
+      }
+    }
+  }
+}
+
+void data_raw_no_forward_begin() {
+  if (config->enableForwarding == false) {
+    ID.push_front(EX_ALU);
+    ID.push_front(EX_lwsw);
+
+    for (int i = 2; i < ID.size(); ++i) {
+        int reg_a = ID[i].inst.sReg_a;
+        int reg_b = ID[i].inst.sReg_b;
+
+      for (int j = i-1; j >= 0 && ID.size() > 2; --j) {
+        int reg_d = ID[j].inst.dReg;
+
+        bool is_reg_wt = is_ALU(ID[j]) || is_lw(ID[j]);
+        if (is_reg_wt && reg_d != 255 && (reg_d == reg_a || reg_d == reg_b)) {
+          for (int k = ID.size() - 1; k >= i; --k) {
+            // insts--;
+            IF.push_front(ID.back());
+            ID.pop_back();
+          }
+
+          Ctrl_ID = false;
+          break;
+        } else {
+          Ctrl_ID = true;
+        }
+      }
+    }
+
+    ID.pop_front();
+    ID.pop_front();
+  }
+}
+
+void data_raw_no_forward_end() {
+  if (config->enableForwarding == false) {
+    bool doOp = false;
+
+    if (IF.size() > 0) {
+      int reg_a = IF.front().inst.sReg_a;
+      int reg_b = IF.front().inst.sReg_b;
+      for (auto i = 0; i < WB.size() && !doOp; ++i) {
+        int reg_d = WB[i].inst.dReg;
+        bool is_reg_wt = is_ALU(WB[i]) || is_lw(WB[i]);
+        doOp = is_reg_wt && reg_d != 255 && (reg_d == reg_a || reg_d == reg_b);
+      }
+    }
+
+    if (doOp) {
+      Ctrl_ID = true;
+    }
+  }
+}
+
+bool data_waw() {
+  bool continueWB = true;
+
+  if (config->regFileWritePorts == 2) {
+    bool is_reg_wt = is_ALU(MEM_ALU) && is_lw(MEM_lwsw);
+
+    if (is_reg_wt && MEM_ALU.inst.dReg != 255 && MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
       continueWB = false;
 
       if (is_older(MEM_ALU, MEM_lwsw)) {
@@ -116,6 +238,26 @@ int writeback()
         MEM_lwsw = get_NOP();
       }
     }
+  }
+
+  return continueWB;
+}
+
+int writeback()
+{
+  static unsigned int cur_seq = 1;
+  bool continueWB = true;
+
+  data_raw_no_forward_end();
+
+  WB.clear();
+
+  if (continueWB) {
+    continueWB = structural_regfile();
+  }
+
+  if (continueWB) {
+    continueWB = data_waw();
   }
 
   if (continueWB) {
@@ -132,15 +274,9 @@ int writeback()
     }
   }
 
-  // J: structural_memory
-  if (config->splitCaches == false) {
-    for (const auto& inst : WB) {
-      if (is_lw(inst)) {
-        Ctrl_sturt_mem = true;
-        break;
-      }
-    }
-  }
+  structural_memory_end();
+
+  data_raw_mem_forward_end();
 
   if (verbose) {/* print the instruction exiting the pipeline if verbose=1 */
     for (auto i = 0; i < (int) WB.size(); i++) {
@@ -163,30 +299,7 @@ int writeback()
 
 int memory()
 {
-  // J: enable fetch code for branch taken since branch inst is done
-  if (is_branch(EX_ALU)) {
-    Ctrl_branch_taken = false;
-  }
-
-  // J: data_raw with mem forwarding
-  if (config->enableForwarding) {
-    for (const auto& dinst : WB) {
-      if (is_lw(dinst)) {
-        int reg_d = dinst.inst.dReg;
-
-        for (auto i = 0; !Ctrl_EX && i < ID.size(); ++i) {
-          int reg_a = ID[i].inst.sReg_a;
-          int reg_b = ID[i].inst.sReg_b;
-
-          if (reg_d == reg_a || reg_d == reg_b) {
-            Ctrl_EX = true;
-            Ctrl_ID = true;
-            Ctrl_IF = true;
-          }
-        }
-      }
-    }
-  }
+  branch_taken_end();
 
   int insts = 0;
   if (is_NOP(MEM_ALU)) {
@@ -201,10 +314,7 @@ int memory()
     insts++;
   }
 
-  // J: structural_memory
-  if (config->splitCaches == false && is_lw(MEM_lwsw)) {
-    Ctrl_sturt_mem = false;
-  }
+  structural_memory_begin();
 
   return insts;
 }
@@ -227,44 +337,19 @@ int issue()
       EX_lwsw = ID.front();
       ID.pop_front();
     }
-    else if (is_NOP(ID.front())) {
-      if (!is_NOP(EX_ALU) && !is_NOP(EX_lwsw)) {
-        break;
-      }
-      ID.pop_front();
-    }
+    // else if (is_NOP(ID.front())) {
+    //   if (!is_NOP(EX_ALU) && !is_NOP(EX_lwsw)) {
+    //     break;
+    //   }
+    //   ID.pop_front();
+    // }
     else {
       assert(0);
     }
     insts++;
   }
 
-  // J: data_raw 2 with ex forwarding
-  if (config->enableForwarding && (is_lw(MEM_lwsw) || is_lw(EX_lwsw))) {
-    if (!is_NOP(EX_ALU)) {
-      ID.push_front(EX_ALU);
-    }
-
-    for (auto dinst : { MEM_lwsw, EX_lwsw }) {
-      int reg_d = dinst.inst.dReg;
-      for (auto i = 0; i < ID.size() && Ctrl_EX && !is_NOP(dinst); ++i) {
-        int reg_a = ID[i].inst.sReg_a;
-        int reg_b = ID[i].inst.sReg_b;
-
-        if (reg_d == reg_a || reg_d == reg_b) {
-          Ctrl_EX = false;
-          Ctrl_ID = false;
-          Ctrl_IF = false;
-
-          EX_ALU = get_NOP();
-        }
-      }
-    }
-
-    if (!is_NOP(EX_ALU)) {
-      ID.pop_front();
-    }
-  }
+  data_raw_mem_forward_begin();
 
   return insts;
 }
@@ -278,37 +363,8 @@ int decode()
     insts++;
   }
 
-  // J: data_raw without forwarding
-  if (Ctrl_ID && config->enableForwarding == false) {
-    ID.push_front(EX_ALU);
-    ID.push_front(EX_lwsw);
-
-    for (int i = 2; i < ID.size(); ++i) {
-        int reg_a = ID[i].inst.sReg_a;
-        int reg_b = ID[i].inst.sReg_b;
-
-      for (int j = i-1; j >= 0 && ID.size() > 2; --j) {
-        int reg_d = ID[j].inst.dReg;
-
-        if ((is_ALU(ID[j]) || is_lw(ID[j])) && (reg_d == reg_a || reg_d == reg_b)) {
-          for (int k = ID.size() - 1; k >= i; --k) {
-            insts--;
-            IF.push_front(ID.back());
-            ID.pop_back();
-          }
-
-          Ctrl_IF = false;
-          Ctrl_ID = false;
-          break;
-        } else {
-          Ctrl_IF = true;
-          Ctrl_ID = true;
-        }
-      }
-    }
-
-    ID.pop_front();
-    ID.pop_front();
+  if (Ctrl_ID) {
+    data_raw_no_forward_begin();
   }
 
   return insts;
@@ -322,7 +378,7 @@ int fetch()
   dynamic_inst dinst;
   instruction *tr_entry = NULL;
 
-  auto doFetch = []() {
+  auto canFetch = []() {
     bool doFetchForBranch = false;
 
     // J: fetch if branch is not taken
@@ -333,11 +389,11 @@ int fetch()
     if (Ctrl_branch_taken && config->branchPredictor && config->branchTargetBuffer)
       doFetchForBranch = true;
 
-    return doFetchForBranch && Ctrl_IF && Ctrl_sturt_mem;
+    return doFetchForBranch && Ctrl_sturt_mem;
   };
 
   /* copy trace entry(s) into IF stage */
-  while (doFetch() && (int)IF.size() < config->pipelineWidth) {
+  while (canFetch() && (int)IF.size() < config->pipelineWidth) {
     size_t size = trace_get_item(&tr_entry); /* put the instruction into a buffer */
     if (size > 0) {
       dinst.inst = *tr_entry;
@@ -349,9 +405,7 @@ int fetch()
         printf("[%d: IF] %s\n", cycle_number, get_instruction_string(IF.back(), true));
       }
 
-      if (is_branch(dinst) && dinst.inst.Addr != dinst.inst.PC + 4) {
-        Ctrl_branch_taken = true;
-        // J: don't fetch any inst if branch taken
+      if (branch_taken_begin(dinst)) {
         break;
       }
     } else {
