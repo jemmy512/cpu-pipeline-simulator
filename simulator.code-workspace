@@ -1,36 +1,36 @@
 {
-	"folders": [
-		{
-			"path": "."
-		}
-	],
-	"launch": {
-		"version": "0.2.0",
-		"configurations": [
-			{
-				"name": "lldb Launch",
-				"type": "cppdbg",
-				"request": "launch",
-				"program": "${workspaceFolder}/five_stage",
-				"args": ["-t", "traces/sample.tr", "-c", "confs/2-wide-opt.conf", "-d"],
-				"stopAtEntry": false,
-				"cwd": "${workspaceFolder}",
-				"environment": [],
-				"externalConsole": false,
-				"MIMode": "lldb",
-				"setupCommands": [
-					{
-						"description": "Enable pretty-printing for gdb",
-						"text": "-enable-pretty-printing",
-						"ignoreFailures": true
-					},
-					{
-						"description": "Set Disassembly Flavor to Intel",
-						"text": "-gdb-set disassembly-flavor intel",
-						"ignoreFailures": true
-					}
-				]
-			}
-		]
-	}
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "launch": {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "lldb Launch",
+                "type": "cppdbg",
+                "request": "launch",
+                "program": "${workspaceFolder}/five_stage",
+                "args": ["-t", "traces/sample.tr", "-c", "confs/2-wide-opt.conf", "-d"],
+                "stopAtEntry": false,
+                "cwd": "${workspaceFolder}",
+                "environment": [],
+                "externalConsole": false,
+                "MIMode": "lldb",
+                "setupCommands": [
+                    {
+                        "description": "Enable pretty-printing for gdb",
+                        "text": "-enable-pretty-printing",
+                        "ignoreFailures": true
+                    },
+                    {
+                        "description": "Set Disassembly Flavor to Intel",
+                        "text": "-gdb-set disassembly-flavor intel",
+                        "ignoreFailures": true
+                    }
+                ]
+            }
+        ]
+    }
 }

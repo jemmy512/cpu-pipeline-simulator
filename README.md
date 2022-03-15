@@ -902,9 +902,11 @@ to
 LOPT = -lglib-2.0 -L/usr/local/opt/glib/lib/
 ```
 
-Lastly, replace all mentions of "five_stage_solution" to
-"five_stage_solution.mac".  The five_stage_solution binary was compiled on
-thoth (a Linux machine) which cannot run on a Mac.
+Replace all mentions of "five_stage_solution" to "five_stage_solution.mac".  The five_stage_solution binary was compiled on thoth (a Linux machine) which cannot run on a Mac.
+
+Install [VS Code](https://code.visualstudio.com/insiders/) and [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb) extension.
+
+Open workspace file [simulator.code-workspace](./simulator.code-workspace) by VS Code.
 
 ## DDD hang issue solution
 
