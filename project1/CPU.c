@@ -1,8 +1,8 @@
 /** Code by @author Wonsun Ahn
  *
  * Implements the five stages of the processor pipeline.  The code you will be
- * modifying mainly.
- */
+ * modifying mainly. */
+
 #include <inttypes.h>
 #include <assert.h>
 #include "CPU.h"
@@ -25,11 +25,11 @@ std::set<int> RawDependence;
 This is the case: some continues BRANCH insts */
 std::set<int> BranchTaken;
 
-// J: control signal
-bool Ctrl_sturt_mem = 0; // J: is stucutual memory hazard
-bool Ctrl_branch_taken = 0; // J: is branch taken
+// J: control signal: is Ctrl_xx happen
+bool Ctrl_stucutual_mem = 0;
+bool Ctrl_branch_taken = 0;
 
-// J: can Ex ID
+// J: can do Ex ID
 bool Ctrl_EX = 1;
 bool Ctrl_ID = 1;
 
@@ -79,17 +79,41 @@ bool is_branch(dynamic_inst dinst) {
   return dinst.inst.type == ti_BRANCH;
 }
 
+bool is_special(dynamic_inst dinst) {
+  return dinst.inst.type == ti_SPECIAL;
+}
+
 bool is_older(dynamic_inst dinst1, dynamic_inst dinst2) {
   return is_NOP(dinst2) || (!is_NOP(dinst1) && dinst1.seq < dinst2.seq);
 }
 
+/* This is a design flaw of 255:
+* if the reg is not used, 255 stands for invalid reg number,
+* other wise 255 presents the valide number.
+So we use -2, -3, -4 to represent invalid reg number of dReg, aReg, bReg, respectively.
 
+[x] reg is not used:
+STORE: (Seq:        9)(Regs: 255[x],  28,      18) EX
+  NOP: (Seq:        0)(Regs:      0,   0,       0) ID
+ITYPE: (Seq:       10)(Regs:      29,  29, 255[x]) IF */
 std::tuple<int, int, int> get_dst_src_regs(dynamic_inst dinst1, dynamic_inst dinst2) {
-  int reg_2d = is_jtype(dinst1) ? 255 : dinst2.inst.dReg;
-  int reg_1a = is_jtype(dinst1) ? 255 : dinst1.inst.sReg_a;
-  int reg_1b = [&dinst1, &dinst2]() -> int {
-    if (is_itype(dinst1) || is_jtype(dinst1) || is_jrtype(dinst1)) {
-      return 255;
+  int reg_2d = [&dinst2]() -> int {
+    if (is_sw(dinst2) || is_branch(dinst2) || is_jtype(dinst2) || is_jrtype(dinst2) || is_special(dinst2)) {
+      return -2;
+    }
+    return dinst2.inst.dReg;
+  }();
+
+  int reg_1a = [&dinst1]() -> int {
+    if (is_jtype(dinst1) || is_special(dinst1)) {
+      return -3;
+    }
+    return dinst1.inst.sReg_a;
+  }();
+
+  int reg_1b = [&dinst1]() -> int {
+    if (is_itype(dinst1) || is_lw(dinst1) || is_jtype(dinst1) || is_jrtype(dinst1) || is_special(dinst1)) {
+      return -4;
     }
     return dinst1.inst.sReg_b;
   }();
@@ -99,17 +123,17 @@ std::tuple<int, int, int> get_dst_src_regs(dynamic_inst dinst1, dynamic_inst din
 
 bool is_raw(dynamic_inst dinst1, dynamic_inst dinst2) {
   auto [reg_2d, reg_1a, reg_1b] = get_dst_src_regs(dinst1, dinst2);
-  return !is_NOP(dinst2) && (reg_2d != 255) && (reg_2d == reg_1a || reg_2d == reg_1b);
+  return !is_NOP(dinst2) && (reg_2d == reg_1a || reg_2d == reg_1b);
 }
 
 bool is_mem_forward(dynamic_inst dinst1, dynamic_inst dinst2) {
   auto [reg_2d, reg_1a, reg_1b] = get_dst_src_regs(dinst1, dinst2);
-  return is_lw(dinst2) && (reg_2d != 255) && (reg_2d == reg_1a || reg_2d == reg_1b);
+  return is_lw(dinst2) && (reg_2d == reg_1a || reg_2d == reg_1b);
 }
 
 bool is_ex_forward(dynamic_inst dinst1, dynamic_inst dinst2) {
   auto [reg_2d, reg_1a, reg_1b] = get_dst_src_regs(dinst1, dinst2);
-  return !is_NOP(dinst2) && !is_lw(dinst2) && (reg_2d != 255) && (reg_2d == reg_1a || reg_2d == reg_1b);
+  return !is_NOP(dinst2) && !is_lw(dinst2) && (reg_2d == reg_1a || reg_2d == reg_1b);
 }
 
 dynamic_inst get_NOP() {
@@ -189,7 +213,7 @@ void branch_taken_end_id() {
 
 void structural_memory_begin() {
   if (!config->splitCaches && is_lw(MEM_lwsw)) {
-    Ctrl_sturt_mem = true;
+    Ctrl_stucutual_mem = true;
   }
 }
 
@@ -197,7 +221,7 @@ void structural_memory_end() {
   if (!config->splitCaches) {
     for (const auto& dinst : WB) {
       if (is_lw(dinst)) {
-        Ctrl_sturt_mem = false;
+        Ctrl_stucutual_mem = false;
         break;
       }
     }
@@ -309,11 +333,7 @@ int data_raw_no_forward_begin() {
             ID.pop_back();
           }
           Ctrl_ID = false;
-          break;
         }
-        // else {
-        //   Ctrl_ID = true;
-        // }
       }
     }
 
@@ -345,9 +365,9 @@ bool data_waw() {
   bool continue_wb = true;
 
   if (config->regFileWritePorts == 2) {
-    bool is_wt = is_reg_wt(MEM_ALU) && is_reg_wt(MEM_lwsw);
+    bool is_multi_wt = is_reg_wt(MEM_ALU) && is_reg_wt(MEM_lwsw);
 
-    if (is_wt && MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
+    if (is_multi_wt && MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
       continue_wb = false;
 
       push_older(WB, MEM_ALU, MEM_lwsw);
@@ -359,22 +379,6 @@ bool data_waw() {
   }
 
   return continue_wb;
-}
-
-void jump_begin() {
-  for (auto i = 0; i < ID.size() && Ctrl_ID; ++i) {
-    if (is_jrtype(ID[i]) && !config->branchPredictor && !config->branchTargetBuffer) {
-      Ctrl_ID = false;
-    }
-  }
-}
-
-void jump_end() {
-  for (auto i = 0; i < WB.size() && !Ctrl_ID; ++i) {
-    if (is_jrtype(WB[i]) && !config->branchPredictor && !config->branchTargetBuffer) {
-      Ctrl_ID = true;
-    }
-  }
 }
 
 int writeback()
@@ -401,8 +405,6 @@ int writeback()
   structural_memory_end();
 
   data_raw_forward_end_mem();
-
-  jump_end();
 
   if (verbose) {/* print the instruction exiting the pipeline if verbose=1 */
     for (auto i = 0; i < (int) WB.size(); i++) {
@@ -498,11 +500,9 @@ int decode()
   }
 
   branch_taken_end_id();
-  jump_begin();
 
   return insts;
 }
-
 
 int fetch()
 {
@@ -512,7 +512,7 @@ int fetch()
   instruction *tr_entry = NULL;
 
   auto canFetch = []() {
-    return !Ctrl_branch_taken && !Ctrl_sturt_mem;
+    return !Ctrl_branch_taken && !Ctrl_stucutual_mem;
   };
 
   /* copy trace entry(s) into IF stage */
