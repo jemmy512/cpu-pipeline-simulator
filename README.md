@@ -16,6 +16,7 @@
     + [Data hazards](#data-hazards)
     + [Control hazards](#control-hazards)
   * [Task 2: Enabling Optimizations on the Hazards](#task-2-enabling-optimizations-on-the-hazards)
+  * [Task 3: Analyzing Performance Plots](#task-3-analyzing-performance-plots)
   * [Source Code](#source-code)
   * [Submission](#submission)
 - [Resources](#resources)
@@ -31,14 +32,13 @@
     + [For Mac](#for-mac)
   * [DDD hang issue solution](#ddd-hang-issue-solution)
 
-
 # CS/COE 1541 - Introduction to Computer Architecture
 Spring Semester 2022 - Project 1
 
 Please accept Project 1 on **GitHub Classroom** using the following link:
 https://classroom.github.com/a/jREHYDcC
 
-* DUE: Mar 16 (Wednesday), 2022 4:30 PM 
+* DUE: Mar 16 (Wednesday), 2022 4:30 PM
 
 # Introduction
 
@@ -391,11 +391,20 @@ active at a time, only one is shown.
 
 ## Creating Performance Plots
 
-**UNDER CONSTRUCTION.  DO NOT TRY YET.**
+**CONSTRUCTION COMPLETE!  DO TO COMPLETE THE PROJECT 1 RETROSPECTIVE!**
 
 Once you are done implementing the simulator, now you can use it to generate
-some performance plots for longer traces of execution.  In order to generate
-the plots, do the following:
+some performance plots for longer traces of execution.  You need to make a
+small change in the [Makefile](Makefile) before generating the plots.  Please
+make sure GNUPLOT is initialized to the following string:
+
+```
+GNUPLOT = /afs/cs.pitt.edu/courses/1541/gnuplot-5.2.8-thoth/bin/gnuplot
+```
+
+Or, you can simply overwrite the Makefile in your GitHub Classroom repository
+with the [Makefile](Makefile) in this course repository.  After making the
+change, generate the plots by invoking the plots target in the Makefile:
 
 
 ```
@@ -533,7 +542,23 @@ In terms of your simulator, this means on a taken branch, inserting bubbles into
 
 ## Task 2: Enabling Optimizations on the Hazards
 
-Enable all the hazard avoidance optimizations that were described in the [Configuration Files](#configuration-files) section.  Be careful that while the optimizations will reduce hazards drastically, there are some hazards that remain even after the optimizations.
+Enable all the hazard avoidance optimizations that were described in the
+[Configuration Files](#configuration-files) section.  Be careful that while the
+optimizations will reduce hazards drastically, there are some hazards that
+remain even after the optimizations.  After having completed this step, your
+five_stage simulator should work identically to the five_stage_solution
+simulator and all diff tests should pass.
+
+## Task 3: Analyzing Performance Plots
+
+**CONSTRUCTION COMPLETE!  DO TO COMPLETE THE PROJECT 1 RETROSPECTIVE!**
+
+First, generate the IPC.pdf and IPC_solution.pdf performance plots and verify
+that they are identical.  Refer to the [Creating Performance
+Plots](#creating-performance-plots) section on how to generate these plots.
+Then, answer the Project 1 Retrospective questions by analyzing the plots.
+**If your plot differs from the solution plot due to incomplete implementation,
+please use the solution plot to answer the questions**.
 
 ## Source Code
 
@@ -564,7 +589,7 @@ enum opcode_type {
 };
 ```
 
-The “PC” (program counter) field is the address of the instruction itself. The “type” of an instruction provides the key information about the instruction. A detailed list of instructions is given below:
+The "PC" (program counter) field is the address of the instruction itself. The "type" of an instruction provides the key information about the instruction. A detailed list of instructions is given below:
 
 ```
 NOP - it's a no-op. No further information is provided.
@@ -630,7 +655,7 @@ You will do two submissions for this deliverable.
    The easiest way to submit the source code is by submitting your GitHub
 repository.  Add your partner as a collaborator so both of you have access.
 Make sure you keep the repository **PRIVATE** so that nobody else can access
-your repository.  
+your repository.
 
    Once you are done modifying code, don't forget to commit and push your
 changes to the github repository.  Before you commit your changes, please do
@@ -643,18 +668,18 @@ don't get deductions.  You will get deductions based on the number of failed
 diffs (-5 per failed diff).  This part of the submission is worth 90 points.
 You start out with 18 failed diffs (out of 32) with no modifications to code,
 so you start out with 90 - 18 * 5 = 0 points.
-    
+
    The alternative way to submit your source code is to directly upload the
 files.  All you have to do is drag and drop source files that you have modified
 on to the Upload window and press the Upload button.  The default files in this
 folder will be used for any files that you don't upload.  While this method in
 the short run is simpler than the GitHub method, you will find that using a
 source repository like GitHub is beneficial in the long run.
-    
-1. **(20 points)** Project 1 Retrospective (Due TBD)
 
-   **NOT AVAILABLE YET**
-   
+1. **(20 points)** Project 1 Retrospective (Due Mar 23, 2022 4:30 PM)
+
+   **CONSTRUCTION COMPLETE! PLEASE DO THIS PART AS WELL!**
+
    Click on the GradeScope "Project 1 Retrospective" link and answer the
 questions based on [Task 3: Analyzing Performance
 Plots](#task-3-analyzing-performance-plots).  Note that this submission is
@@ -664,7 +689,7 @@ questions which are easily answerable by simply reading the plot.  10 points
 worth of questions (the extra credit) are short answer questions that ask you
 to explain and make conjectures about the experimental results, and require
 some additional thinking.
-    
+
    Just like other scientists, computer architects try to draw conclusions
 from experimental data from their simulators.  Some conclusions are strongly
 supported by the data and other conclusions less so.  In a proper scientific
@@ -675,7 +700,7 @@ practice drawing conclusions from data, just like architects do every day.
 Since this is extra credit, I will expect you to write a reasonable conclusion
 --- something that is not supported by the data and your knowledge of the
 simulator will not get you any points.
-    
+
 # Resources
 
 * Windows SSH Terminal Client: [Putty](https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html)
@@ -693,7 +718,7 @@ repository for your group.  Git is one of the most popular source versioning
 and collaboration tools used in industry and GitHub is a major provider of that
 service.  By using Git, your project doesn't evaporate if you spill coffee on
 your laptop.  Also, it allows you and your partner to work on the same source
-code without stepping on each other's toes by maintaining a central repository.  
+code without stepping on each other's toes by maintaining a central repository.
 
 
 1. You need a clone of the Remote Repository on GitHub on your machine to start

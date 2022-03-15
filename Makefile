@@ -16,8 +16,10 @@ PLOT_CONFS = $(wildcard plot_confs/*.conf)
 PLOT_OUTPUTS := $(foreach conf,$(PLOT_CONFS),$(foreach trace, $(SHORT_TRACES), plots/$(trace:$(SHORT_TRACES_DIR)/%.tr=%).$(conf:plot_confs/%.conf=%).out))
 PLOT_OUTPUTS_SOLUTION := $(foreach conf,$(PLOT_CONFS),$(foreach trace, $(SHORT_TRACES), plots_solution/$(trace:$(SHORT_TRACES_DIR)/%.tr=%).$(conf:plot_confs/%.conf=%).out))
 
-COPT = -g -Wall -I/usr/include/glib-2.0/ -I/usr/lib/x86_64-linux-gnu/glib-2.0/include/
-LOPT = -lglib-2.0
+# COPT = -g -Wall -I/usr/include/glib-2.0/ -I/usr/lib/x86_64-linux-gnu/glib-2.0/include/
+# LOPT = -lglib-2.0
+COPT = -std=c++17 -g -Wall -I/usr/include/glib-2.0/ -I/usr/lib/x86_64-linux-gnu/glib-2.0/include/ -I/usr/local/opt/glib/include/glib-2.0/ -I/usr/local/opt/glib/lib/glib-2.0/include/
+LOPT = -lglib-2.0 -L/usr/local/opt/glib/lib/
 CC = g++
 
 all: build run
@@ -47,9 +49,9 @@ outputs/$(1:traces/%.tr=%).$(2:confs/%.conf=%).out: five_stage $(1) $(2)
 	@echo "Running ./five_stage -t $(1) -c $(2) -d > $$@"
 	-@./five_stage -t $(1) -c $(2) -d > $$@
 
-outputs_solution/$(1:traces/%.tr=%).$(2:confs/%.conf=%).out: five_stage_solution $(1) $(2)
-	@echo "Running ./five_stage_solution -t $(1) -c $(2) -d > $$@"
-	-@./five_stage_solution -t $(1) -c $(2) -d > $$@
+outputs_solution/$(1:traces/%.tr=%).$(2:confs/%.conf=%).out: five_stage_solution.mac $(1) $(2)
+	@echo "Running ./five_stage_solution.mac -t $(1) -c $(2) -d > $$@"
+	-@./five_stage_solution.mac -t $(1) -c $(2) -d > $$@
 endef
 
 $(foreach trace,$(TRACES),$(foreach conf, $(CONFS), $(eval $(call run_rules,$(trace),$(conf)))))
@@ -67,9 +69,9 @@ plots/$(1:$(SHORT_TRACES_DIR)/%.tr=%).$(2:plot_confs/%.conf=%).out: five_stage $
 	@echo "Running ./five_stage -t $(1) -c $(2) > $$@"
 	-@./five_stage -t $(1) -c $(2) > $$@
 
-plots_solution/$(1:$(SHORT_TRACES_DIR)/%.tr=%).$(2:plot_confs/%.conf=%).out: five_stage_solution $(1) $(2)
-	@echo "Running ./five_stage_solution -t $(1) -c $(2) > $$@"
-	-@./five_stage_solution -t $(1) -c $(2) > $$@
+plots_solution/$(1:$(SHORT_TRACES_DIR)/%.tr=%).$(2:plot_confs/%.conf=%).out: five_stage_solution.mac $(1) $(2)
+	@echo "Running ./five_stage_solution.mac -t $(1) -c $(2) > $$@"
+	-@./five_stage_solution.mac -t $(1) -c $(2) > $$@
 endef
 
 $(foreach trace,$(SHORT_TRACES),$(foreach conf, $(PLOT_CONFS), $(eval $(call plot_rules,$(trace),$(conf)))))
