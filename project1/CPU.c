@@ -9,6 +9,7 @@
 #include "trace.h"
 #include <stdio.h>
 #include <set>
+#include <tuple>
 
 unsigned int cycle_number = 0;
 unsigned int inst_number = 0;
@@ -17,7 +18,12 @@ std::deque<dynamic_inst> IF, ID, WB;
 dynamic_inst EX_ALU = {0}, MEM_ALU = {0};
 dynamic_inst EX_lwsw = {0}, MEM_lwsw = {0};
 
-std::set<int> Dependences; // sample.1-wide CYCLE NUMBER: 14
+/* sample.1-wide CYCLE NUMBER: 14 */
+std::set<int> RawDependence;
+
+/* sample.2-wide-opt CYCLE NUMBER: 76
+This is the case: some continues BRANCH insts */
+std::set<int> BranchTaken;
 
 // J: control signal
 bool Ctrl_sturt_mem = 0; // J: is stucutual memory hazard
@@ -32,6 +38,10 @@ int do_issue(int ex_size);
 bool is_ALU(dynamic_inst dinst) {
   instruction inst = dinst.inst;
   return inst.type != ti_NOP && inst.type != ti_LOAD && inst.type != ti_STORE;
+}
+
+bool is_itype(dynamic_inst dinst) {
+  return dinst.inst.type == ti_ITYPE;
 }
 
 bool is_reg_wt(dynamic_inst dinst) {
@@ -57,6 +67,14 @@ bool is_NOP(dynamic_inst dinst) {
   return inst.type == ti_NOP;
 }
 
+bool is_jtype(dynamic_inst dinst) {
+  return dinst.inst.type == ti_JTYPE;
+}
+
+bool is_jrtype(dynamic_inst dinst) {
+  return dinst.inst.type == ti_JRTYPE;
+}
+
 bool is_branch(dynamic_inst dinst) {
   return dinst.inst.type == ti_BRANCH;
 }
@@ -65,24 +83,32 @@ bool is_older(dynamic_inst dinst1, dynamic_inst dinst2) {
   return is_NOP(dinst2) || (!is_NOP(dinst1) && dinst1.seq < dinst2.seq);
 }
 
+
+std::tuple<int, int, int> get_dst_src_regs(dynamic_inst dinst1, dynamic_inst dinst2) {
+  int reg_2d = is_jtype(dinst1) ? 255 : dinst2.inst.dReg;
+  int reg_1a = is_jtype(dinst1) ? 255 : dinst1.inst.sReg_a;
+  int reg_1b = [&dinst1, &dinst2]() -> int {
+    if (is_itype(dinst1) || is_jtype(dinst1) || is_jrtype(dinst1)) {
+      return 255;
+    }
+    return dinst1.inst.sReg_b;
+  }();
+
+  return { reg_2d, reg_1a, reg_1b };
+}
+
 bool is_raw(dynamic_inst dinst1, dynamic_inst dinst2) {
-  int reg_2d = dinst2.inst.dReg;
-  int reg_1a = dinst1.inst.sReg_a;
-  int reg_1b = dinst1.inst.sReg_b;
+  auto [reg_2d, reg_1a, reg_1b] = get_dst_src_regs(dinst1, dinst2);
   return !is_NOP(dinst2) && (reg_2d != 255) && (reg_2d == reg_1a || reg_2d == reg_1b);
 }
 
 bool is_mem_forward(dynamic_inst dinst1, dynamic_inst dinst2) {
-  int reg_2d = dinst2.inst.dReg;
-  int reg_1a = dinst1.inst.sReg_a;
-  int reg_1b = dinst1.inst.sReg_b;
+  auto [reg_2d, reg_1a, reg_1b] = get_dst_src_regs(dinst1, dinst2);
   return is_lw(dinst2) && (reg_2d != 255) && (reg_2d == reg_1a || reg_2d == reg_1b);
 }
 
 bool is_ex_forward(dynamic_inst dinst1, dynamic_inst dinst2) {
-  int reg_2d = dinst2.inst.dReg;
-  int reg_1a = dinst1.inst.sReg_a;
-  int reg_1b = dinst1.inst.sReg_b;
+  auto [reg_2d, reg_1a, reg_1b] = get_dst_src_regs(dinst1, dinst2);
   return !is_NOP(dinst2) && !is_lw(dinst2) && (reg_2d != 255) && (reg_2d == reg_1a || reg_2d == reg_1b);
 }
 
@@ -94,17 +120,46 @@ dynamic_inst get_NOP() {
 bool is_finished()
 {
   /* Finished when pipeline is completely empty */
-  if (IF.size() > 0 || ID.size() > 0) return 0;
+  if (IF.size() > 0 || ID.size() > 0) {
+    return 0;
+  }
+
   if (!is_NOP(EX_ALU) || !is_NOP(MEM_ALU) || !is_NOP(EX_lwsw) || !is_NOP(MEM_lwsw)) {
     return 0;
   }
+
   return 1;
+}
+
+void push_older(std::deque<dynamic_inst>& queue, dynamic_inst& dinst1, dynamic_inst& dinst2) {
+  if (is_older(dinst1, dinst2)) {
+    queue.push_back(dinst1);
+    dinst1 = get_NOP();
+  } else {
+    queue.push_back(dinst2);
+    dinst2 = get_NOP();
+  }
+}
+
+void push_inorder(std::deque<dynamic_inst>& queue, dynamic_inst& dinst1, dynamic_inst& dinst2) {
+  if (is_older(dinst1, dinst2)) {
+    queue.push_back(dinst1);
+    dinst1 = get_NOP();
+    queue.push_back(dinst2);
+    dinst2 = get_NOP();
+  } else {
+    queue.push_back(dinst2);
+    dinst2 = get_NOP();
+    queue.push_back(dinst1);
+    dinst1 = get_NOP();
+  }
 }
 
 bool branch_taken_begin(dynamic_inst dinst) {
   // J: branch taken: branch target is not the next inst pc
-  if (is_branch(dinst) && dinst.inst.Addr != dinst.inst.PC + 4) {
-  // if (is_branch(dinst)) {
+  // J: sample.2-wide-opt cycle 31
+  if (is_branch(dinst) && (dinst.inst.Addr != dinst.inst.PC + 4)) {
+    BranchTaken.emplace(dinst.seq);
     Ctrl_branch_taken = true;
     return true;
   }
@@ -113,14 +168,22 @@ bool branch_taken_begin(dynamic_inst dinst) {
 }
 
 void branch_taken_end_ex() {
-  if (is_branch(EX_ALU)) {
+  BranchTaken.erase(EX_ALU.seq);
+
+  if (BranchTaken.empty()) {
     Ctrl_branch_taken = false;
   }
 }
 
 void branch_taken_end_id() {
-  if (is_branch(EX_ALU) && config->branchPredictor && config->branchTargetBuffer) {
-    Ctrl_branch_taken = false;
+  if (config->branchPredictor && config->branchTargetBuffer) {
+    for (auto& dinst : ID) {
+      BranchTaken.erase(dinst.seq);
+    }
+
+    if (BranchTaken.empty()) {
+      Ctrl_branch_taken = false;
+    }
   }
 }
 
@@ -147,13 +210,7 @@ bool structural_regfile() {
   if (is_reg_wt(MEM_ALU) && is_reg_wt(MEM_lwsw) && (config->regFileWritePorts == 1)) {
     continue_wb = false;
 
-    if (is_older(MEM_ALU, MEM_lwsw)) {
-      WB.push_back(MEM_ALU);
-      MEM_ALU = get_NOP();
-    } else {
-      WB.push_back(MEM_lwsw);
-      MEM_lwsw = get_NOP();
-    }
+    push_older(WB, MEM_ALU, MEM_lwsw);
 
     while (WB.size() < config->pipelineWidth) {
       WB.push_back(get_NOP());
@@ -175,7 +232,7 @@ int data_raw_forward_begin() {
           ex_size = i;
           Ctrl_EX = false;
           is_first_ctrl_ex = true;
-          Dependences.emplace(ID[j].seq);
+          RawDependence.emplace(ID[j].seq);
         }
       }
     }
@@ -192,17 +249,16 @@ int data_raw_forward_begin() {
   return ID.size();
 }
 
-void data_raw_ex_forward_end() {
+void data_raw_forward_end_ex() {
   if (config->enableForwarding) {
     WB.push_back(MEM_ALU);
     WB.push_back(MEM_lwsw);
 
     for (const auto& dinst : WB) {
-      bool is_dependent = Dependences.find(dinst.seq) != Dependences.end();
-      if (is_dependent) {
+      if (RawDependence.count(dinst.seq)) {
         for (auto i = 0; !Ctrl_EX && i < ID.size(); ++i) {
           if (is_ex_forward(ID[i], dinst)) {
-            Dependences.erase(dinst.seq);
+            RawDependence.erase(dinst.seq);
             Ctrl_EX = true;
           }
         }
@@ -214,14 +270,13 @@ void data_raw_ex_forward_end() {
   }
 }
 
-void data_raw_mem_forward_end() {
+void data_raw_forward_end_mem() {
   if (config->enableForwarding) {
     for (const auto& dinst : WB) {
-      bool is_dependent = Dependences.find(dinst.seq) != Dependences.end();
-      if (is_dependent) {
+      if (RawDependence.count(dinst.seq)) {
         for (auto i = 0; !Ctrl_EX && i < ID.size(); ++i) {
           if (is_mem_forward(ID[i], dinst)) {
-            Dependences.erase(dinst.seq);
+            RawDependence.erase(dinst.seq);
             Ctrl_EX = true;
           }
         }
@@ -245,8 +300,8 @@ int data_raw_no_forward_begin() {
 
     for (int i = 4 + WB.size(); i < ID.size() && Ctrl_ID; ++i) {
       for (int j = i-1; j >= 0 && ID.size() > 4 + WB.size() && Ctrl_ID; --j) {
-        if (is_reg_wt(ID[j]) && is_raw(ID[i], ID[j])) {
-          Dependences.emplace(ID[j].seq);
+        if (is_raw(ID[i], ID[j])) {
+          RawDependence.emplace(ID[j].seq);
 
           for (int k = ID.size() - 1; k >= i; --k) {
             ++insts;
@@ -254,9 +309,11 @@ int data_raw_no_forward_begin() {
             ID.pop_back();
           }
           Ctrl_ID = false;
-        } else {
-          Ctrl_ID = true;
+          break;
         }
+        // else {
+        //   Ctrl_ID = true;
+        // }
       }
     }
 
@@ -273,17 +330,12 @@ int data_raw_no_forward_begin() {
 }
 
 void data_raw_no_forward_end() {
-  if (!config->enableForwarding) {
-    bool is_write_done = false;
-
-    if (IF.size() > 0) {
-      for (auto i = 0; i < WB.size() && !is_write_done; ++i) {
-        bool is_dependent = Dependences.find(WB[i].seq) != Dependences.end();
-        is_write_done = is_dependent && is_raw(IF.front(), WB[i]);
-        if (is_write_done) {
-          Dependences.erase(WB[i].seq);
-          Ctrl_ID = true;
-        }
+  if (!config->enableForwarding && IF.size() > 0) {
+    for (auto i = 0; i < WB.size(); ++i) {
+      if (RawDependence.count(WB[i].seq)) {
+        RawDependence.erase(WB[i].seq);
+        Ctrl_ID = true;
+        return;
       }
     }
   }
@@ -298,13 +350,7 @@ bool data_waw() {
     if (is_wt && MEM_ALU.inst.dReg == MEM_lwsw.inst.dReg) {
       continue_wb = false;
 
-      if (is_older(MEM_ALU, MEM_lwsw)) {
-        WB.push_back(MEM_ALU);
-        MEM_ALU = get_NOP();
-      } else {
-        WB.push_back(MEM_lwsw);
-        MEM_lwsw = get_NOP();
-      }
+      push_older(WB, MEM_ALU, MEM_lwsw);
 
       while (WB.size() < config->pipelineWidth) {
         WB.push_back(get_NOP());
@@ -313,6 +359,22 @@ bool data_waw() {
   }
 
   return continue_wb;
+}
+
+void jump_begin() {
+  for (auto i = 0; i < ID.size() && Ctrl_ID; ++i) {
+    if (is_jrtype(ID[i]) && !config->branchPredictor && !config->branchTargetBuffer) {
+      Ctrl_ID = false;
+    }
+  }
+}
+
+void jump_end() {
+  for (auto i = 0; i < WB.size() && !Ctrl_ID; ++i) {
+    if (is_jrtype(WB[i]) && !config->branchPredictor && !config->branchTargetBuffer) {
+      Ctrl_ID = true;
+    }
+  }
 }
 
 int writeback()
@@ -333,22 +395,14 @@ int writeback()
   }
 
   if (continue_wb) {
-    if (is_older(MEM_ALU, MEM_lwsw)) {
-      WB.push_back(MEM_ALU);
-      MEM_ALU = get_NOP();
-      WB.push_back(MEM_lwsw);
-      MEM_lwsw = get_NOP();
-    } else {
-      WB.push_back(MEM_lwsw);
-      MEM_lwsw = get_NOP();
-      WB.push_back(MEM_ALU);
-      MEM_ALU = get_NOP();
-    }
+    push_inorder(WB, MEM_ALU, MEM_lwsw);
   }
 
   structural_memory_end();
 
-  data_raw_mem_forward_end();
+  data_raw_forward_end_mem();
+
+  jump_end();
 
   if (verbose) {/* print the instruction exiting the pipeline if verbose=1 */
     for (auto i = 0; i < (int) WB.size(); i++) {
@@ -393,7 +447,7 @@ int memory()
 
 int issue()
 {
-  data_raw_ex_forward_end();
+  data_raw_forward_end_ex();
 
   /* in-order issue */
   int ex_size = data_raw_forward_begin();
@@ -432,8 +486,6 @@ int do_issue(int ex_size) {
 
 int decode()
 {
-  branch_taken_end_id();
-
   int insts = 0;
   while (Ctrl_ID && (int)IF.size() > 0 && (int)ID.size() < config->pipelineWidth) {
     ID.push_back(IF.front());
@@ -444,6 +496,9 @@ int decode()
   if (Ctrl_ID) {
     insts -= data_raw_no_forward_begin();
   }
+
+  branch_taken_end_id();
+  jump_begin();
 
   return insts;
 }
@@ -457,17 +512,7 @@ int fetch()
   instruction *tr_entry = NULL;
 
   auto canFetch = []() {
-    bool doFetchForBranch = false;
-
-    // J: fetch if branch is not taken
-    if (!Ctrl_branch_taken)
-      doFetchForBranch = true;
-
-    // J: fetch if branch is taken but predictor is enabled
-    if (Ctrl_branch_taken && config->branchPredictor && config->branchTargetBuffer)
-      doFetchForBranch = true;
-
-    return doFetchForBranch && !Ctrl_sturt_mem;
+    return !Ctrl_branch_taken && !Ctrl_sturt_mem;
   };
 
   /* copy trace entry(s) into IF stage */
@@ -485,13 +530,14 @@ int fetch()
 
       // J: don't fetch any more inst if branch taken
       if (branch_taken_begin(dinst)) {
-        break;
+        goto fetch_done;
       }
     } else {
       break;
     }
   }
 
+fetch_done:
   inst_number += insts;
 
   return insts;
